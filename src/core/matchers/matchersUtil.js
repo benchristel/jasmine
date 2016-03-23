@@ -2,10 +2,10 @@ getJasmineRequireObj().matchersUtil = function(j$) {
   // TODO: what to do about jasmine.pp not being inject? move to JSON.stringify? gut PrettyPrinter?
 
   return {
-    equals: function(a, b, customTesters) {
+    equals: function(a, b, customTesters, diffBuilder) {
       customTesters = customTesters || [];
 
-      return eq(a, b, [], [], customTesters);
+      return eq(a, b, [], [], customTesters, diffBuilder);
     },
 
     contains: function(haystack, needle, customTesters) {
@@ -48,7 +48,9 @@ getJasmineRequireObj().matchersUtil = function(j$) {
       }
 
       return message + '.';
-    }
+    },
+
+    DiffBuilder: DiffBuilder
   };
 
   function isAsymmetric(obj) {
@@ -74,8 +76,10 @@ getJasmineRequireObj().matchersUtil = function(j$) {
 
   // Equality function lovingly adapted from isEqual in
   //   [Underscore](http://underscorejs.org)
-  function eq(a, b, aStack, bStack, customTesters) {
+  function eq(a, b, aStack, bStack, customTesters, diffBuilder) {
     var result = true;
+
+    diffBuilder = diffBuilder || NullDiffBuilder();
 
     var asymmetricResult = asymmetricMatch(a, b);
     if (!j$.util.isUndefined(asymmetricResult)) {
@@ -109,7 +113,7 @@ getJasmineRequireObj().matchersUtil = function(j$) {
       case '[object Number]':
         // `NaN`s are equivalent, but non-reflexive. An `egal` comparison is performed for
         // other numeric values.
-        return a != +a ? b != +b : (a === 0 ? 1 / a == 1 / b : a == +b);
+        return diffBuilder.mismatchUnless(a != +a ? b != +b : (a === 0 ? 1 / a == 1 / b : a == +b), a, b);
       case '[object Date]':
       case '[object Boolean]':
         // Coerce dates and booleans to numeric primitive values. Dates are compared by their
@@ -189,12 +193,12 @@ getJasmineRequireObj().matchersUtil = function(j$) {
     size = aKeys.length;
 
     // Ensure that both objects contain the same number of properties before comparing deep equality.
-    if (keys(b, className == '[object Array]').length !== size) { return false; }
+    //if (keys(b, className == '[object Array]').length !== size) { return false; }
 
     while (size--) {
       key = aKeys[size];
       // Deep compare each member
-      result = has(b, key) && eq(a[key], b[key], aStack, bStack, customTesters);
+      result = has(b, key) && eq(a[key], b[key], aStack, bStack, customTesters, diffBuilder.atPath(key));
 
       if (!result) {
         return false;
@@ -239,5 +243,48 @@ getJasmineRequireObj().matchersUtil = function(j$) {
     function isFunction(obj) {
       return typeof obj === 'function';
     }
+  }
+
+  function NullDiffBuilder() {
+    var self = {
+      message: function() {
+        return '';
+      },
+
+      mismatchUnless: function(matches) {
+        return matches;
+      },
+
+      atPath: function() {
+        return self;
+      }
+    }
+
+    return self;
+  }
+
+  function DiffBuilder() {
+    var message = '';
+
+    function WithPath(path) {
+      return {
+        message: function() {
+          return message;
+        },
+
+        mismatchUnless: function(matches, actual, expected) {
+          if (!matches && path != '$') {
+            message += '\n    Expected ' + path + ' = ' + actual + ' to equal ' + expected;
+          }
+          return matches;
+        },
+
+        atPath: function(pathComponent) {
+          return WithPath(path + '.' + pathComponent);
+        }
+      }
+    }
+
+    return WithPath('$');
   }
 };
