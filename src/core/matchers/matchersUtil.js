@@ -178,8 +178,7 @@ getJasmineRequireObj().matchersUtil = function(j$) {
       // Objects with different constructors are not equivalent, but `Object`s
       // or `Array`s from different frames are.
       var aCtor = a.constructor, bCtor = b.constructor;
-      if (aCtor !== bCtor && !(isFunction(aCtor) && aCtor instanceof aCtor &&
-                               isFunction(bCtor) && bCtor instanceof bCtor)) {
+      if (aCtor !== bCtor && 'constructor' in a && 'constructor' in b) {
         return false;
       }
     }
@@ -234,10 +233,6 @@ getJasmineRequireObj().matchersUtil = function(j$) {
 
     function has(obj, key) {
       return Object.prototype.hasOwnProperty.call(obj, key);
-    }
-
-    function isFunction(obj) {
-      return typeof obj === 'function';
     }
   }
 };

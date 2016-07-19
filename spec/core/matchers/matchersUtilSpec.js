@@ -93,6 +93,23 @@ describe("matchersUtil", function() {
       expect(jasmineUnderTest.matchersUtil.equals(new Error("foo"), new Error("bar"))).toBe(false);
     });
 
+    it("fails for objects with different constructors", function() {
+      function One() {}
+      function Two() {}
+
+      expect(jasmineUnderTest.matchersUtil.equals(new One(), new Two())).toBe(false);
+    });
+
+    it("passes when one object has no constructor but is equivalent to the other object", function() {
+      function One() {}
+
+      var hasConstructor = new One(),
+          noConstructor = Object.create(null);
+
+      expect(jasmineUnderTest.matchersUtil.equals(hasConstructor, noConstructor)).toBe(true);
+      expect(jasmineUnderTest.matchersUtil.equals(noConstructor, hasConstructor)).toBe(true);
+    })
+
     it("passes for Objects that are equivalent (simple case)", function() {
       expect(jasmineUnderTest.matchersUtil.equals({a: "foo"}, {a: "foo"})).toBe(true);
     });
