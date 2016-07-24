@@ -2,10 +2,10 @@ getJasmineRequireObj().matchersUtil = function(j$) {
   // TODO: what to do about jasmine.pp not being inject? move to JSON.stringify? gut PrettyPrinter?
 
   return {
-    equals: function(a, b, customTesters) {
+    equals: function(a, b, customTesters, diffBuilder) {
       customTesters = customTesters || [];
 
-      return eq(a, b, [], [], customTesters);
+      return eq(a, b, [], [], customTesters, diffBuilder);
     },
 
     contains: function(haystack, needle, customTesters) {
@@ -96,10 +96,10 @@ getJasmineRequireObj().matchersUtil = function(j$) {
     // Identical objects are equal. `0 === -0`, but they aren't identical.
     // See the [Harmony `egal` proposal](http://wiki.ecmascript.org/doku.php?id=harmony:egal).
     if (a === b) { return a !== 0 || 1 / a == 1 / b; }
-    // A strict comparison is necessary because `null == undefined`.
-    if (a === null || b === null) { return a === b; }
     var className = Object.prototype.toString.call(a);
-    if (className != Object.prototype.toString.call(b)) { return false; }
+    if (className != Object.prototype.toString.call(b)) {
+      return false;
+    }
     switch (className) {
       // Strings, numbers, dates, and booleans are compared by value.
       case '[object String]':
@@ -122,89 +122,121 @@ getJasmineRequireObj().matchersUtil = function(j$) {
           a.global == b.global &&
           a.multiline == b.multiline &&
           a.ignoreCase == b.ignoreCase;
-    }
-    if (typeof a != 'object' || typeof b != 'object') { return false; }
-
-    var aIsDomNode = j$.isDomNode(a);
-    var bIsDomNode = j$.isDomNode(b);
-    if (aIsDomNode && bIsDomNode) {
-      // At first try to use DOM3 method isEqualNode
-      if (a.isEqualNode) {
-        return a.isEqualNode(b);
-      }
-      // IE8 doesn't support isEqualNode, try to use outerHTML && innerText
-      var aIsElement = a instanceof Element;
-      var bIsElement = b instanceof Element;
-      if (aIsElement && bIsElement) {
-        return a.outerHTML == b.outerHTML;
-      }
-      if (aIsElement || bIsElement) {
-        return false;
-      }
-      return a.innerText == b.innerText && a.textContent == b.textContent;
-    }
-    if (aIsDomNode || bIsDomNode) {
-      return false;
-    }
-
-    // Assume equality for cyclic structures. The algorithm for detecting cyclic
-    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
-    var length = aStack.length;
-    while (length--) {
-      // Linear search. Performance is inversely proportional to the number of
-      // unique nested structures.
-      if (aStack[length] == a) { return bStack[length] == b; }
-    }
-    // Add the first object to the stack of traversed objects.
-    aStack.push(a);
-    bStack.push(b);
-    var size = 0;
-    // Recursively compare objects and arrays.
-    // Compare array lengths to determine if a deep comparison is necessary.
-    if (className == '[object Array]') {
-      size = a.length;
-      if (size !== b.length) {
-        return false;
-      }
-
-      while (size--) {
-        result = eq(a[size], b[size], aStack, bStack, customTesters);
-        if (!result) {
+      case '[object Array]':
+        // Assume equality for cyclic structures. The algorithm for detecting cyclic
+        // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+        var length = aStack.length;
+        while (length--) {
+          // Linear search. Performance is inversely proportional to the number of
+          // unique nested structures.
+          if (aStack[length] == a) { return bStack[length] == b; }
+        }
+        // Add the first object to the stack of traversed objects.
+        aStack.push(a);
+        bStack.push(b);
+        var size = a.length;
+        if (size !== b.length) {
           return false;
         }
-      }
-    } else {
 
-      // Objects with different constructors are not equivalent, but `Object`s
-      // or `Array`s from different frames are.
-      var aCtor = a.constructor, bCtor = b.constructor;
-      if (aCtor !== bCtor && !(isFunction(aCtor) && aCtor instanceof aCtor &&
-                               isFunction(bCtor) && bCtor instanceof bCtor)) {
-        return false;
-      }
+        while (size--) {
+          result = eq(a[size], b[size], aStack, bStack, customTesters);
+          if (!result) {
+            return false;
+          }
+        }
+        // Deep compare objects.
+        var aKeys = keys(a, true), key;
+        size = aKeys.length;
+
+        while (size--) {
+          key = aKeys[size];
+          // Deep compare each member
+          result = has(b, key) && eq(a[key], b[key], aStack, bStack, customTesters);
+
+          if (!result) {
+            return false;
+          }
+        }
+        // Remove the first object from the stack of traversed objects.
+        aStack.pop();
+        bStack.pop();
+
+        return result;
+      case '[object Object]':
+        // Assume equality for cyclic structures. The algorithm for detecting cyclic
+        // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+        var length = aStack.length;
+        while (length--) {
+          // Linear search. Performance is inversely proportional to the number of
+          // unique nested structures.
+          if (aStack[length] == a) { return bStack[length] == b; }
+        }
+
+        // Objects with different constructors are not equivalent, but `Object`s
+        // or `Array`s from different frames are.
+        var aCtor = a.constructor, bCtor = b.constructor;
+        if (aCtor !== bCtor && !(isFunction(aCtor) && aCtor instanceof aCtor &&
+                                 isFunction(bCtor) && bCtor instanceof bCtor)) {
+          return false;
+        }
+
+        // Add the first object to the stack of traversed objects.
+        aStack.push(a);
+        bStack.push(b);
+        // Deep compare objects.
+        var aKeys = keys(a, false), key;
+        var size = aKeys.length;
+
+        // Ensure that both objects contain the same number of properties before comparing deep equality.
+        var bSize = keys(b, false).length;
+        if (bSize !== size) {
+          return false;
+        }
+
+        while (size--) {
+          key = aKeys[size];
+
+          var hasKey = has(b, key);
+          if (!hasKey) {
+            var diff = {};
+            diff[key] = a[key];
+          }
+          // Deep compare each member
+          result = hasKey && eq(a[key], b[key], aStack, bStack, customTesters);
+
+          if (!result) {
+            return false;
+          }
+        }
+        // Remove the first object from the stack of traversed objects.
+        aStack.pop();
+        bStack.pop();
+
+        return result;
+      default:
+        var aIsDomNode = j$.isDomNode(a);
+        var bIsDomNode = j$.isDomNode(b);
+        if (aIsDomNode && bIsDomNode) {
+          // At first try to use DOM3 method isEqualNode
+          if (a.isEqualNode) {
+            return a.isEqualNode(b);
+          }
+          // IE8 doesn't support isEqualNode, try to use outerHTML && innerText
+          var aIsElement = a instanceof Element;
+          var bIsElement = b instanceof Element;
+          if (aIsElement && bIsElement) {
+            return a.outerHTML == b.outerHTML;
+          }
+          if (aIsElement || bIsElement) {
+            return false;
+          }
+          return a.innerText == b.innerText && a.textContent == b.textContent;
+        }
+        if (aIsDomNode || bIsDomNode) {
+          return false;
+        }
     }
-
-    // Deep compare objects.
-    var aKeys = keys(a, className == '[object Array]'), key;
-    size = aKeys.length;
-
-    // Ensure that both objects contain the same number of properties before comparing deep equality.
-    if (keys(b, className == '[object Array]').length !== size) { return false; }
-
-    while (size--) {
-      key = aKeys[size];
-      // Deep compare each member
-      result = has(b, key) && eq(a[key], b[key], aStack, bStack, customTesters);
-
-      if (!result) {
-        return false;
-      }
-    }
-    // Remove the first object from the stack of traversed objects.
-    aStack.pop();
-    bStack.pop();
-
-    return result;
 
     function keys(obj, isArray) {
       var allKeys = Object.keys ? Object.keys(obj) :
